@@ -20,11 +20,26 @@ pub fn derive(input: TokenStream) -> TokenStream {
     let Fields::Named(fields) = data.fields else {
         unimplemented!();
     };
-    let builder_fields = fields.named.into_iter().map(|n| {
-        let ident = n.ident.unwrap();
-        let ty = n.ty;
+    let named_fields: Vec<_> = fields
+        .named
+        .iter()
+        .map(|n| {
+            let ident = n.ident.as_ref().unwrap();
+            let ty = &n.ty;
+            (ident, ty)
+        })
+        .collect();
+    let builder_fields = named_fields.iter().map(|(ident, ty)| {
         quote! {
             pub #ident: ::std::option::Option<#ty>
+        }
+    });
+    let builder_methods = named_fields.iter().map(|(ident, ty)| {
+        quote! {
+            pub fn #ident(&mut self, #ident: #ty) -> &mut Self {
+                self.#ident = ::std::option::Option::Some(#ident);
+                self
+            }
         }
     });
 
@@ -32,6 +47,10 @@ pub fn derive(input: TokenStream) -> TokenStream {
         #[derive(Default)]
         struct #builder_ident {
             #(#builder_fields),*
+        }
+
+        impl #builder_ident {
+            #(#builder_methods)*
         }
 
         impl #ident {
