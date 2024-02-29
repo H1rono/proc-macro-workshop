@@ -42,6 +42,12 @@ pub fn derive(input: TokenStream) -> TokenStream {
             }
         }
     });
+    let build_method_fields = named_fields.iter().map(|(ident, _)| {
+        quote! {
+            #ident: self.#ident.take()
+                .ok_or(concat!("field ", stringify!(#ident), " is not set").to_string())?
+        }
+    });
 
     quote! {
         #[derive(Default)]
@@ -51,6 +57,15 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
         impl #builder_ident {
             #(#builder_methods)*
+
+            pub fn build(&mut self) -> ::std::result::Result<
+                #ident,
+                ::std::boxed::Box<dyn ::std::error::Error>
+            > {
+                ::std::result::Result::Ok(#ident {
+                    #(#build_method_fields),*
+                })
+            }
         }
 
         impl #ident {
