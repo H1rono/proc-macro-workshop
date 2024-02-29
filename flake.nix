@@ -27,6 +27,7 @@
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
             toolchain
+            cargo-expand
           ] ++ lib.optionals stdenv.isDarwin [
             libiconv
           ];
