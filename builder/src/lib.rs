@@ -2,6 +2,7 @@ use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{parse_macro_input, Data, DeriveInput, Fields, GenericArgument, PathArguments, Type};
 
+#[derive(Clone, Copy)]
 enum FieldTypeInfo<'a> {
     OptionWrapped(&'a Type),
     Raw(&'a Type),
@@ -34,13 +35,13 @@ pub fn derive(input: TokenStream) -> TokenStream {
             (ident, ty)
         })
         .collect();
-    let builder_fields = named_fields.iter().map(|(ident, ty)| {
+    let builder_fields = named_fields.iter().map(|&(ident, ty)| {
         let ty = ty.as_inner();
         quote! {
             pub #ident: ::std::option::Option<#ty>
         }
     });
-    let builder_methods = named_fields.iter().map(|(ident, ty)| {
+    let builder_methods = named_fields.iter().map(|&(ident, ty)| {
         let ty = ty.as_inner();
         quote! {
             pub fn #ident(&mut self, #ident: #ty) -> &mut Self {
