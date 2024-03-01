@@ -1,11 +1,17 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, Data, DeriveInput, Fields, GenericArgument, PathArguments, Type};
+use syn::{
+    parse_macro_input, Data, DeriveInput, Fields, GenericArgument, Ident, PathArguments, Type,
+};
 
 #[derive(Clone, Copy)]
 enum FieldTypeInfo<'a> {
     OptionWrapped(&'a Type),
     Raw(&'a Type),
+}
+
+struct BuilderAttrArgs {
+    each: Ident,
 }
 
 #[proc_macro_derive(Builder)]
@@ -128,5 +134,21 @@ impl<'a> FieldTypeInfo<'a> {
 
     pub fn is_opt_wrapped(&self) -> bool {
         matches!(self, Self::OptionWrapped(_))
+    }
+}
+
+impl syn::parse::Parse for BuilderAttrArgs {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let arg_id: Ident = input.parse()?;
+        if arg_id != "each" {
+            return Err(syn::Error::new(
+                arg_id.span(),
+                "unexpected argument, expected `each`",
+            ));
+        }
+        let _: syn::Token![=] = input.parse()?;
+        let arg_var: syn::LitStr = input.parse()?;
+        let arg_var = Ident::new(&arg_var.value(), arg_var.span());
+        Ok(Self { each: arg_var })
     }
 }
