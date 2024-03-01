@@ -100,7 +100,7 @@ impl<'a> FieldTypeInfo<'a> {
         let Some(seg) = p.path.segments.first() else {
             return Self::Raw(ty);
         };
-        if &seg.ident.to_string() != "Option" {
+        if seg.ident != "Option" {
             return Self::Raw(ty);
         }
         let PathArguments::AngleBracketed(seg_args) = &seg.arguments else {
