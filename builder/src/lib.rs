@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
@@ -7,6 +9,7 @@ use syn::{
 #[derive(Clone, Copy)]
 enum FieldTypeInfo<'a> {
     OptionWrapped(&'a Type),
+    VecWrapped(&'a Type),
     Raw(&'a Type),
 }
 
@@ -14,7 +17,7 @@ struct BuilderAttrArgs {
     each: Ident,
 }
 
-#[proc_macro_derive(Builder)]
+#[proc_macro_derive(Builder, attributes(builder))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let DeriveInput {
         attrs: _,
@@ -38,27 +41,83 @@ pub fn derive(input: TokenStream) -> TokenStream {
         .map(|n| {
             let ident = n.ident.as_ref().unwrap();
             let ty = FieldTypeInfo::parse(&n.ty);
-            (ident, ty)
+            let args = n.attrs.iter().find_map(|a| {
+                let id = a.path().get_ident()?;
+                if id != "builder" {
+                    return None;
+                }
+                let syn::Meta::List(meta_list) = &a.meta else {
+                    return None;
+                };
+                let attr_args = meta_list.parse_args::<BuilderAttrArgs>().ok()?;
+                Some(attr_args)
+            });
+            (ident, ty, args)
         })
         .collect();
-    let builder_fields = named_fields.iter().map(|&(ident, ty)| {
-        let ty = ty.as_inner();
-        quote! {
-            pub #ident: ::std::option::Option<#ty>
-        }
+    let builder_fields = named_fields.iter().map(|&(ident, ty, _)| match ty {
+        FieldTypeInfo::OptionWrapped(oty) => quote! {
+            pub #ident: ::std::option::Option<#oty>
+        },
+        FieldTypeInfo::VecWrapped(vty) => quote! {
+            pub #ident: ::std::vec::Vec<#vty>
+        },
+        FieldTypeInfo::Raw(rty) => quote! {
+            pub #ident: ::std::option::Option<#rty>
+        },
     });
-    let builder_methods = named_fields.iter().map(|&(ident, ty)| {
-        let ty = ty.as_inner();
-        quote! {
-            pub fn #ident(&mut self, #ident: #ty) -> &mut Self {
-                self.#ident = ::std::option::Option::Some(#ident);
+
+    let builder_methods = named_fields.iter().map(|&(ident, ty, _)| {
+        let method = match ty {
+            FieldTypeInfo::OptionWrapped(oty) => quote! {
+                pub fn #ident(&mut self, #ident: #oty) -> &mut Self {
+                    self.#ident = ::std::option::Option::Some(#ident);
+                    self
+                }
+            },
+            FieldTypeInfo::VecWrapped(vty) => quote! {
+                pub fn #ident(&mut self, #ident: ::std::vec::Vec<#vty>) -> &mut Self {
+                    self.#ident = #ident;
+                    self
+                }
+            },
+            FieldTypeInfo::Raw(rty) => quote! {
+                pub fn #ident(&mut self, #ident: #rty) -> &mut Self {
+                    self.#ident = ::std::option::Option::Some(#ident);
+                    self
+                }
+            },
+        };
+        (ident, method)
+    });
+    let builder_each_methods = named_fields.iter().filter_map(|(ref ident, ty, args)| {
+        let BuilderAttrArgs { each } = args.as_ref()?;
+        let FieldTypeInfo::VecWrapped(ty) = ty else {
+            panic!(r#"`#[builder(each = "...")]` can only be used for `Vec<T>`"#);
+        };
+        let method = quote! {
+            pub fn #each(&mut self, #each: #ty) -> &mut Self {
+                self.#ident.push(#each);
                 self
             }
-        }
+        };
+        Some((each, method))
     });
-    let build_method_fields = named_fields.iter().map(|(ident, ty)| match ty {
+    let builder_methods = builder_methods
+        .chain(builder_each_methods)
+        .collect::<HashMap<_, _>>();
+    let builder_methods = builder_methods.into_values();
+
+    let build_method_fields = named_fields.iter().map(|(ident, ty, _)| match ty {
         FieldTypeInfo::OptionWrapped(_) => quote! {
             #ident: self.#ident.take()
+        },
+        FieldTypeInfo::VecWrapped(_) => quote! {
+            #ident: {
+                let v = self.#ident.clone();
+                self.#ident = vec![];
+                v
+            }
         },
         FieldTypeInfo::Raw(_) => quote! {
             #ident: self.#ident.take()
@@ -97,39 +156,65 @@ pub fn derive(input: TokenStream) -> TokenStream {
 #[allow(unused)]
 impl<'a> FieldTypeInfo<'a> {
     pub fn parse(ty: &'a Type) -> Self {
-        let Type::Path(p) = ty else {
-            return Self::Raw(ty);
-        };
-        if p.qself.is_some() || p.path.leading_colon.is_some() {
-            return Self::Raw(ty);
+        macro_rules! filter_try {
+            (let $p:pat = $e:expr) => {
+                let $p = $e else {
+                    return Self::Raw(ty);
+                };
+            };
+            (if $e:expr) => {
+                if $e {
+                    return Self::Raw(ty);
+                }
+            };
         }
+
+        filter_try!(let Type::Path(p) = ty);
+        filter_try!(if p.qself.is_some() || p.path.leading_colon.is_some());
         let Some(seg) = p.path.segments.first() else {
             return Self::Raw(ty);
         };
-        if seg.ident != "Option" {
-            return Self::Raw(ty);
+        if seg.ident == "Option" {
+            let PathArguments::AngleBracketed(seg_args) = &seg.arguments else {
+                return Self::Raw(ty);
+            };
+            if seg_args.args.len() != 1 {
+                return Self::Raw(ty);
+            }
+            let Some(GenericArgument::Type(arg_ty)) = seg_args.args.first() else {
+                return Self::Raw(ty);
+            };
+            return Self::OptionWrapped(arg_ty);
         }
-        let PathArguments::AngleBracketed(seg_args) = &seg.arguments else {
-            return Self::Raw(ty);
-        };
-        if seg_args.args.len() != 1 {
-            return Self::Raw(ty);
+        if seg.ident == "Vec" {
+            let PathArguments::AngleBracketed(seg_args) = &seg.arguments else {
+                return Self::Raw(ty);
+            };
+            if seg_args.args.len() != 1 {
+                return Self::Raw(ty);
+            }
+            let Some(GenericArgument::Type(arg_ty)) = seg_args.args.first() else {
+                return Self::Raw(ty);
+            };
+            return Self::VecWrapped(arg_ty);
         }
-        let Some(GenericArgument::Type(arg_ty)) = seg_args.args.first() else {
-            return Self::Raw(ty);
-        };
-        Self::OptionWrapped(arg_ty)
+        Self::Raw(ty)
     }
 
     pub fn as_inner(&'a self) -> &'a Type {
         match self {
             Self::OptionWrapped(oty) => oty,
+            Self::VecWrapped(vty) => vty,
             Self::Raw(rty) => rty,
         }
     }
 
     pub fn is_raw(&self) -> bool {
         matches!(self, Self::Raw(_))
+    }
+
+    pub fn is_vec_wrapped(&self) -> bool {
+        matches!(self, Self::VecWrapped(_))
     }
 
     pub fn is_opt_wrapped(&self) -> bool {
