@@ -1,6 +1,11 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, Data, DeriveInput, Fields};
+use syn::{parse_macro_input, Data, DeriveInput, Fields, GenericArgument, PathArguments, Type};
+
+enum FieldTypeInfo<'a> {
+    OptionWrapped(&'a Type),
+    Raw(&'a Type),
+}
 
 #[proc_macro_derive(Builder)]
 pub fn derive(input: TokenStream) -> TokenStream {
@@ -75,4 +80,47 @@ pub fn derive(input: TokenStream) -> TokenStream {
         }
     }
     .into()
+}
+
+#[allow(unused)]
+impl<'a> FieldTypeInfo<'a> {
+    pub fn parse(ty: &'a Type) -> Self {
+        let Type::Path(p) = ty else {
+            return Self::Raw(ty);
+        };
+        if p.qself.is_some() || p.path.leading_colon.is_some() {
+            return Self::Raw(ty);
+        }
+        let Some(seg) = p.path.segments.first() else {
+            return Self::Raw(ty);
+        };
+        if &seg.ident.to_string() != "Option" {
+            return Self::Raw(ty);
+        }
+        let PathArguments::AngleBracketed(seg_args) = &seg.arguments else {
+            return Self::Raw(ty);
+        };
+        if seg_args.args.len() != 1 {
+            return Self::Raw(ty);
+        }
+        let Some(GenericArgument::Type(arg_ty)) = seg_args.args.first() else {
+            return Self::Raw(ty);
+        };
+        Self::OptionWrapped(arg_ty)
+    }
+
+    pub fn as_inner(&'a self) -> &'a Type {
+        match self {
+            Self::OptionWrapped(oty) => oty,
+            Self::Raw(rty) => rty,
+        }
+    }
+
+    pub fn is_raw(&self) -> bool {
+        matches!(self, Self::Raw(_))
+    }
+
+    pub fn is_opt_wrapped(&self) -> bool {
+        matches!(self, Self::OptionWrapped(_))
+    }
 }
