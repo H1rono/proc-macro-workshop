@@ -30,16 +30,18 @@ pub fn derive(input: TokenStream) -> TokenStream {
         .iter()
         .map(|n| {
             let ident = n.ident.as_ref().unwrap();
-            let ty = &n.ty;
+            let ty = FieldTypeInfo::parse(&n.ty);
             (ident, ty)
         })
         .collect();
     let builder_fields = named_fields.iter().map(|(ident, ty)| {
+        let ty = ty.as_inner();
         quote! {
             pub #ident: ::std::option::Option<#ty>
         }
     });
     let builder_methods = named_fields.iter().map(|(ident, ty)| {
+        let ty = ty.as_inner();
         quote! {
             pub fn #ident(&mut self, #ident: #ty) -> &mut Self {
                 self.#ident = ::std::option::Option::Some(#ident);
@@ -47,11 +49,14 @@ pub fn derive(input: TokenStream) -> TokenStream {
             }
         }
     });
-    let build_method_fields = named_fields.iter().map(|(ident, _)| {
-        quote! {
+    let build_method_fields = named_fields.iter().map(|(ident, ty)| match ty {
+        FieldTypeInfo::OptionWrapped(_) => quote! {
+            #ident: self.#ident.take()
+        },
+        FieldTypeInfo::Raw(_) => quote! {
             #ident: self.#ident.take()
                 .ok_or(concat!("field ", stringify!(#ident), " is not set").to_string())?
-        }
+        },
     });
 
     quote! {
