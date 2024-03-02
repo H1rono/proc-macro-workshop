@@ -27,6 +27,7 @@ version = "0.0.0"
 name = "derive_builder"
 version = "0.0.0"
 dependencies = [
+ "proc-macro2",
  "quote",
  "syn",
  "trybuild",
