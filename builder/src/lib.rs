@@ -19,14 +19,21 @@ struct BuilderAttrArgs {
 
 #[proc_macro_derive(Builder, attributes(builder))]
 pub fn derive(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match derive_builder(input) {
+        Ok(t) => t,
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+fn derive_builder(input: DeriveInput) -> syn::Result<TokenStream> {
     let DeriveInput {
         attrs: _,
         vis: _,
         ident,
         generics: _,
         data,
-    } = parse_macro_input!(input as DeriveInput);
-
+    } = input;
     let builder_ident = format_ident!("{}Builder", ident);
 
     let Data::Struct(data) = data else {
@@ -125,7 +132,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
         },
     });
 
-    quote! {
+    let code = quote! {
         #[derive(Default)]
         struct #builder_ident {
             #(#builder_fields),*
@@ -149,8 +156,8 @@ pub fn derive(input: TokenStream) -> TokenStream {
                 ::std::default::Default::default()
             }
         }
-    }
-    .into()
+    };
+    Ok(code.into())
 }
 
 #[allow(unused)]
