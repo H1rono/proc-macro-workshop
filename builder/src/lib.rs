@@ -7,7 +7,7 @@ use quote::{format_ident, quote};
 use syn::spanned::Spanned;
 use syn::{parse_macro_input, Data, DeriveInput, Fields, Ident};
 
-use field::FieldTypeInfo;
+use field::FieldTypeKind;
 
 struct BuilderAttrArgs {
     each: Ident,
@@ -47,7 +47,7 @@ fn derive_builder(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         .iter()
         .map(|n| {
             let ident = n.ident.as_ref().cloned().unwrap();
-            let ty = FieldTypeInfo::parse(n.ty.clone());
+            let ty = FieldTypeKind::parse(n.ty.clone());
             let args = n.attrs.iter().find_map(|a| {
                 let id = a.path().get_ident()?;
                 if id != "builder" {
@@ -63,32 +63,32 @@ fn derive_builder(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         })
         .collect();
     let builder_fields = named_fields.iter().map(|(ref ident, ty, _)| match ty {
-        FieldTypeInfo::OptionWrapped(oty) => quote! {
+        FieldTypeKind::OptionWrapped(oty) => quote! {
             pub #ident: ::std::option::Option<#oty>
         },
-        FieldTypeInfo::VecWrapped(vty) => quote! {
+        FieldTypeKind::VecWrapped(vty) => quote! {
             pub #ident: ::std::vec::Vec<#vty>
         },
-        FieldTypeInfo::Raw(rty) => quote! {
+        FieldTypeKind::Raw(rty) => quote! {
             pub #ident: ::std::option::Option<#rty>
         },
     });
 
     let builder_methods = named_fields.iter().map(|(ref ident, ty, _)| {
         let method = match ty {
-            FieldTypeInfo::OptionWrapped(oty) => quote! {
+            FieldTypeKind::OptionWrapped(oty) => quote! {
                 pub fn #ident(&mut self, #ident: #oty) -> &mut Self {
                     self.#ident = ::std::option::Option::Some(#ident);
                     self
                 }
             },
-            FieldTypeInfo::VecWrapped(vty) => quote! {
+            FieldTypeKind::VecWrapped(vty) => quote! {
                 pub fn #ident(&mut self, #ident: ::std::vec::Vec<#vty>) -> &mut Self {
                     self.#ident = #ident;
                     self
                 }
             },
-            FieldTypeInfo::Raw(rty) => quote! {
+            FieldTypeKind::Raw(rty) => quote! {
                 pub fn #ident(&mut self, #ident: #rty) -> &mut Self {
                     self.#ident = ::std::option::Option::Some(#ident);
                     self
@@ -99,7 +99,7 @@ fn derive_builder(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     });
     let builder_each_methods = named_fields.iter().filter_map(|(ref ident, ty, args)| {
         let BuilderAttrArgs { each } = args.as_ref()?;
-        let FieldTypeInfo::VecWrapped(ty) = ty else {
+        let FieldTypeKind::VecWrapped(ty) = ty else {
             panic!(r#"`#[builder(each = "...")]` can only be used for `Vec<T>`"#);
         };
         let method = quote! {
@@ -116,17 +116,17 @@ fn derive_builder(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let builder_methods = builder_methods.into_values();
 
     let build_method_fields = named_fields.iter().map(|(ident, ty, _)| match ty {
-        FieldTypeInfo::OptionWrapped(_) => quote! {
+        FieldTypeKind::OptionWrapped(_) => quote! {
             #ident: self.#ident.take()
         },
-        FieldTypeInfo::VecWrapped(_) => quote! {
+        FieldTypeKind::VecWrapped(_) => quote! {
             #ident: {
                 let v = self.#ident.clone();
                 self.#ident = vec![];
                 v
             }
         },
-        FieldTypeInfo::Raw(_) => quote! {
+        FieldTypeKind::Raw(_) => quote! {
             #ident: self.#ident.take()
                 .ok_or(concat!("field ", stringify!(#ident), " is not set").to_string())?
         },

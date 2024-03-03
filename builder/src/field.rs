@@ -1,14 +1,14 @@
 use syn::Type;
 
 #[derive(Clone)]
-pub enum FieldTypeInfo {
+pub enum FieldTypeKind {
     OptionWrapped(Type),
     VecWrapped(Type),
     Raw(Type),
 }
 
 #[allow(unused)]
-impl FieldTypeInfo {
+impl FieldTypeKind {
     pub fn parse(ty: Type) -> Self {
         macro_rules! filter_try {
             (let $p:pat = $e:expr) => {
