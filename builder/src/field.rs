@@ -1,4 +1,16 @@
+#![allow(unused)]
+
 use syn::{spanned::Spanned, Attribute, Error, Ident, Type};
+
+#[derive(Clone)]
+pub struct Field {
+    pub attrs: Option<FieldAttribute>,
+    pub vis: syn::Visibility,
+    pub ident: Ident,
+    pub colon_token: syn::Token![:],
+    pub ty: FieldTypeKind,
+    pub span: proc_macro2::Span,
+}
 
 #[derive(Clone)]
 pub enum FieldTypeKind {
@@ -35,7 +47,33 @@ pub struct FieldAttrInner {
     pub val: syn::LitStr,
 }
 
-#[allow(unused)]
+impl Field {
+    pub fn parse_field(field: syn::Field) -> syn::Result<Self> {
+        let span = field.span();
+        let syn::Field {
+            mut attrs,
+            vis,
+            mutability: _,
+            ident,
+            colon_token,
+            ty,
+        } = field;
+        let attrs = attrs
+            .pop()
+            .map(FieldAttribute::parse_attribute)
+            .transpose()?;
+        let ty = FieldTypeKind::parse(ty);
+        Ok(Self {
+            attrs,
+            vis,
+            ident: ident.unwrap(),
+            colon_token: colon_token.unwrap(),
+            ty,
+            span,
+        })
+    }
+}
+
 impl FieldTypeKind {
     pub fn parse(ty: Type) -> Self {
         macro_rules! filter_try {
@@ -110,7 +148,6 @@ impl FieldTypeKind {
     }
 }
 
-#[allow(unused)]
 impl FieldAttribute {
     pub fn parse_attribute(attribute: Attribute) -> syn::Result<Self> {
         let span = attribute.meta.span();
