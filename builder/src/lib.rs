@@ -63,10 +63,10 @@ fn derive_builder(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         })
         .collect();
     let builder_fields = named_fields.iter().map(|(ref ident, ty, _)| match ty {
-        FieldTypeKind::OptionWrapped(oty) => quote! {
+        FieldTypeKind::OptionWrapped { ty: oty, .. } => quote! {
             pub #ident: ::std::option::Option<#oty>
         },
-        FieldTypeKind::VecWrapped(vty) => quote! {
+        FieldTypeKind::VecWrapped { ty: vty, .. } => quote! {
             pub #ident: ::std::vec::Vec<#vty>
         },
         FieldTypeKind::Raw(rty) => quote! {
@@ -76,13 +76,13 @@ fn derive_builder(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 
     let builder_methods = named_fields.iter().map(|(ref ident, ty, _)| {
         let method = match ty {
-            FieldTypeKind::OptionWrapped(oty) => quote! {
+            FieldTypeKind::OptionWrapped { ty: oty, .. } => quote! {
                 pub fn #ident(&mut self, #ident: #oty) -> &mut Self {
                     self.#ident = ::std::option::Option::Some(#ident);
                     self
                 }
             },
-            FieldTypeKind::VecWrapped(vty) => quote! {
+            FieldTypeKind::VecWrapped { ty: vty, .. } => quote! {
                 pub fn #ident(&mut self, #ident: ::std::vec::Vec<#vty>) -> &mut Self {
                     self.#ident = #ident;
                     self
@@ -99,7 +99,7 @@ fn derive_builder(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     });
     let builder_each_methods = named_fields.iter().filter_map(|(ref ident, ty, args)| {
         let BuilderAttrArgs { each } = args.as_ref()?;
-        let FieldTypeKind::VecWrapped(ty) = ty else {
+        let FieldTypeKind::VecWrapped { ty, .. } = ty else {
             panic!(r#"`#[builder(each = "...")]` can only be used for `Vec<T>`"#);
         };
         let method = quote! {
@@ -116,10 +116,10 @@ fn derive_builder(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let builder_methods = builder_methods.into_values();
 
     let build_method_fields = named_fields.iter().map(|(ident, ty, _)| match ty {
-        FieldTypeKind::OptionWrapped(_) => quote! {
+        FieldTypeKind::OptionWrapped { .. } => quote! {
             #ident: self.#ident.take()
         },
-        FieldTypeKind::VecWrapped(_) => quote! {
+        FieldTypeKind::VecWrapped { .. } => quote! {
             #ident: {
                 let v = self.#ident.clone();
                 self.#ident = vec![];
