@@ -1,15 +1,15 @@
 use syn::Type;
 
-#[derive(Clone, Copy)]
-pub enum FieldTypeInfo<'a> {
-    OptionWrapped(&'a Type),
-    VecWrapped(&'a Type),
-    Raw(&'a Type),
+#[derive(Clone)]
+pub enum FieldTypeInfo {
+    OptionWrapped(Type),
+    VecWrapped(Type),
+    Raw(Type),
 }
 
 #[allow(unused)]
-impl<'a> FieldTypeInfo<'a> {
-    pub fn parse(ty: &'a Type) -> Self {
+impl FieldTypeInfo {
+    pub fn parse(ty: Type) -> Self {
         macro_rules! filter_try {
             (let $p:pat = $e:expr) => {
                 let $p = $e else {
@@ -23,41 +23,35 @@ impl<'a> FieldTypeInfo<'a> {
             };
         }
 
-        use syn::{GenericArgument, PathArguments};
+        use syn::{punctuated::Pair, GenericArgument, PathArguments};
 
-        filter_try!(let Type::Path(p) = ty);
+        filter_try!(let Type::Path(mut p) = ty.clone());
         filter_try!(if p.qself.is_some() || p.path.leading_colon.is_some());
-        let Some(seg) = p.path.segments.first() else {
-            return Self::Raw(ty);
-        };
+        filter_try!(let Some(Pair::End(seg)) = p.path.segments.pop());
         if seg.ident == "Option" {
-            let PathArguments::AngleBracketed(seg_args) = &seg.arguments else {
-                return Self::Raw(ty);
-            };
-            if seg_args.args.len() != 1 {
-                return Self::Raw(ty);
-            }
-            let Some(GenericArgument::Type(arg_ty)) = seg_args.args.first() else {
-                return Self::Raw(ty);
-            };
+            filter_try!(let PathArguments::AngleBracketed(mut seg_args) = seg.arguments);
+            filter_try!(if seg_args.args.len() != 1);
+            filter_try!(let Some(Pair::End(GenericArgument::Type(arg_ty))) = seg_args.args.pop());
             return Self::OptionWrapped(arg_ty);
         }
         if seg.ident == "Vec" {
-            let PathArguments::AngleBracketed(seg_args) = &seg.arguments else {
-                return Self::Raw(ty);
-            };
-            if seg_args.args.len() != 1 {
-                return Self::Raw(ty);
-            }
-            let Some(GenericArgument::Type(arg_ty)) = seg_args.args.first() else {
-                return Self::Raw(ty);
-            };
+            filter_try!(let PathArguments::AngleBracketed(mut seg_args) = seg.arguments);
+            filter_try!(if seg_args.args.len() != 1);
+            filter_try!(let Some(Pair::End(GenericArgument::Type(arg_ty))) = seg_args.args.pop());
             return Self::VecWrapped(arg_ty);
         }
         Self::Raw(ty)
     }
 
-    pub fn as_inner(&'a self) -> &'a Type {
+    pub fn as_inner(&self) -> &Type {
+        match self {
+            Self::OptionWrapped(oty) => oty,
+            Self::VecWrapped(vty) => vty,
+            Self::Raw(rty) => rty,
+        }
+    }
+
+    pub fn into_inner(self) -> Type {
         match self {
             Self::OptionWrapped(oty) => oty,
             Self::VecWrapped(vty) => vty,

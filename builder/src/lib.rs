@@ -46,8 +46,8 @@ fn derive_builder(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         .named
         .iter()
         .map(|n| {
-            let ident = n.ident.as_ref().unwrap();
-            let ty = FieldTypeInfo::parse(&n.ty);
+            let ident = n.ident.as_ref().cloned().unwrap();
+            let ty = FieldTypeInfo::parse(n.ty.clone());
             let args = n.attrs.iter().find_map(|a| {
                 let id = a.path().get_ident()?;
                 if id != "builder" {
@@ -62,7 +62,7 @@ fn derive_builder(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             (ident, ty, args)
         })
         .collect();
-    let builder_fields = named_fields.iter().map(|&(ident, ty, _)| match ty {
+    let builder_fields = named_fields.iter().map(|(ref ident, ty, _)| match ty {
         FieldTypeInfo::OptionWrapped(oty) => quote! {
             pub #ident: ::std::option::Option<#oty>
         },
@@ -74,7 +74,7 @@ fn derive_builder(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         },
     });
 
-    let builder_methods = named_fields.iter().map(|&(ident, ty, _)| {
+    let builder_methods = named_fields.iter().map(|(ref ident, ty, _)| {
         let method = match ty {
             FieldTypeInfo::OptionWrapped(oty) => quote! {
                 pub fn #ident(&mut self, #ident: #oty) -> &mut Self {
