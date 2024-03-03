@@ -5,13 +5,9 @@ use std::collections::HashMap;
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::spanned::Spanned;
-use syn::{parse_macro_input, Data, DeriveInput, Fields, Ident};
+use syn::{parse_macro_input, Data, DeriveInput, Fields};
 
-use field::FieldTypeKind;
-
-struct BuilderAttrArgs {
-    each: Ident,
-}
+use field::{Field, FieldTypeKind};
 
 #[proc_macro_derive(Builder, attributes(builder))]
 pub fn derive(input: TokenStream) -> TokenStream {
@@ -42,27 +38,13 @@ fn derive_builder(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             "`derive(Builder)` only accepts struct with named field",
         ));
     };
-    let named_fields: Vec<_> = fields
+    let named_fields = fields
         .named
         .iter()
-        .map(|n| {
-            let ident = n.ident.as_ref().cloned().unwrap();
-            let ty = FieldTypeKind::parse(n.ty.clone());
-            let args = n.attrs.iter().find_map(|a| {
-                let id = a.path().get_ident()?;
-                if id != "builder" {
-                    return None;
-                }
-                let syn::Meta::List(meta_list) = &a.meta else {
-                    return None;
-                };
-                let attr_args = meta_list.parse_args::<BuilderAttrArgs>().ok()?;
-                Some(attr_args)
-            });
-            (ident, ty, args)
-        })
-        .collect();
-    let builder_fields = named_fields.iter().map(|(ref ident, ty, _)| match ty {
+        .cloned()
+        .map(Field::parse_field)
+        .collect::<syn::Result<Vec<_>>>()?;
+    let builder_fields = named_fields.iter().map(|Field { ident, ty, .. }| match ty {
         FieldTypeKind::OptionWrapped { ty: oty, .. } => quote! {
             pub #ident: ::std::option::Option<#oty>
         },
@@ -74,7 +56,7 @@ fn derive_builder(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         },
     });
 
-    let builder_methods = named_fields.iter().map(|(ref ident, ty, _)| {
+    let builder_methods = named_fields.iter().map(|Field { ident, ty, .. }| {
         let method = match ty {
             FieldTypeKind::OptionWrapped { ty: oty, .. } => quote! {
                 pub fn #ident(&mut self, #ident: #oty) -> &mut Self {
@@ -97,25 +79,28 @@ fn derive_builder(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         };
         (ident, method)
     });
-    let builder_each_methods = named_fields.iter().filter_map(|(ref ident, ty, args)| {
-        let BuilderAttrArgs { each } = args.as_ref()?;
+    let builder_each_methods = named_fields.iter().filter_map(|field| {
+        let Field {
+            ident, ty, attrs, ..
+        } = field;
+        let field::FieldAttribute { each_val, .. } = attrs.as_ref()?;
         let FieldTypeKind::VecWrapped { ty, .. } = ty else {
             panic!(r#"`#[builder(each = "...")]` can only be used for `Vec<T>`"#);
         };
         let method = quote! {
-            pub fn #each(&mut self, #each: #ty) -> &mut Self {
-                self.#ident.push(#each);
+            pub fn #each_val(&mut self, #each_val: #ty) -> &mut Self {
+                self.#ident.push(#each_val);
                 self
             }
         };
-        Some((each, method))
+        Some((each_val, method))
     });
     let builder_methods = builder_methods
         .chain(builder_each_methods)
         .collect::<HashMap<_, _>>();
     let builder_methods = builder_methods.into_values();
 
-    let build_method_fields = named_fields.iter().map(|(ident, ty, _)| match ty {
+    let build_method_fields = named_fields.iter().map(|Field { ident, ty, .. }| match ty {
         FieldTypeKind::OptionWrapped { .. } => quote! {
             #ident: self.#ident.take()
         },
@@ -158,20 +143,4 @@ fn derive_builder(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         }
     };
     Ok(code)
-}
-
-impl syn::parse::Parse for BuilderAttrArgs {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let arg_id: Ident = input.parse()?;
-        if arg_id != "each" {
-            return Err(syn::Error::new(
-                arg_id.span(),
-                "unexpected argument, expected `each`",
-            ));
-        }
-        let _: syn::Token![=] = input.parse()?;
-        let arg_var: syn::LitStr = input.parse()?;
-        let arg_var = Ident::new(&arg_var.value(), arg_var.span());
-        Ok(Self { each: arg_var })
-    }
 }
