@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
+use syn::spanned::Spanned;
 use syn::{
     parse_macro_input, Data, DeriveInput, Fields, GenericArgument, Ident, PathArguments, Type,
 };
@@ -21,26 +22,30 @@ struct BuilderAttrArgs {
 pub fn derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     match derive_builder(input) {
-        Ok(t) => t,
+        Ok(t) => t.into(),
         Err(e) => e.to_compile_error().into(),
     }
 }
 
-fn derive_builder(input: DeriveInput) -> syn::Result<TokenStream> {
+fn derive_builder(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let DeriveInput {
         attrs: _,
         vis: _,
         ident,
         generics: _,
         data,
-    } = input;
+    } = &input;
     let builder_ident = format_ident!("{}Builder", ident);
 
-    let Data::Struct(data) = data else {
-        unimplemented!();
-    };
-    let Fields::Named(fields) = data.fields else {
-        unimplemented!();
+    let Data::Struct(syn::DataStruct {
+        fields: Fields::Named(fields),
+        ..
+    }) = data
+    else {
+        return Err(syn::Error::new(
+            input.span(),
+            "`derive(Builder)` only accepts struct with named field",
+        ));
     };
     let named_fields: Vec<_> = fields
         .named
@@ -157,7 +162,7 @@ fn derive_builder(input: DeriveInput) -> syn::Result<TokenStream> {
             }
         }
     };
-    Ok(code.into())
+    Ok(code)
 }
 
 #[allow(unused)]
