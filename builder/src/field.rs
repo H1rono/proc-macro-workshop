@@ -164,8 +164,8 @@ impl FieldAttribute {
         let syn::MacroDelimiter::Paren(paren_token) = meta_list.delimiter else {
             return Err(err());
         };
-        let builder = meta_list.path.get_ident().cloned().ok_or(err())?;
-        if builder == "builder" {
+        let builder = meta_list.path.get_ident().cloned().ok_or_else(err)?;
+        if builder != "builder" {
             return Err(err());
         }
         let FieldAttrInner {
